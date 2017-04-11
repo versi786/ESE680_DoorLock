@@ -54,9 +54,18 @@ typedef struct bs {
 	uint32_t integrity_check;
 	uint8_t signature[3];
 	int8_t executing_image;
-	int8_t downlaoded_image;	
-	uint8_t arr[NVMCTRL_PAGE_SIZE-9]  
+	int8_t downlaoded_image;
+	uint8_t arr[NVMCTRL_PAGE_SIZE-9];
 }boot_status;
+
+typedef struct fh {
+  uint32_t crc;
+  uint32_t size;
+  uint32_t sw_version;
+  uint32_t hw_version;
+} firmware_header;
+
+firmware_header download_header;
 
 // FLASH CHIP CONFIG
 #define FLASH_SPI_SERCOM          SERCOM1
@@ -65,7 +74,7 @@ typedef struct bs {
 
 
 #define SERIALFLASH_SPI_MODULE      SERCOM1
-#define SERIALFLASH_SPI_MUX_SETTING SPI_SIGNAL_MUX_SETTING_E 
+#define SERIALFLASH_SPI_MUX_SETTING SPI_SIGNAL_MUX_SETTING_E
 #define SERIALFLASH_SPI_PINMUX_PAD0 PINMUX_PA16C_SERCOM1_PAD0 /// MISO
 #define SERIALFLASH_SPI_PINMUX_PAD1 PINMUX_UNUSED
 #define SERIALFLASH_SPI_PINMUX_PAD2 PINMUX_PA18C_SERCOM1_PAD2 /// MOSI
@@ -95,8 +104,6 @@ typedef struct bs {
 //! [buffers]
 #define AT25DFX_BUFFER_SIZE  (10)
 
-static uint8_t read_buffer[AT25DFX_BUFFER_SIZE];
-static uint8_t write_buffer[AT25DFX_BUFFER_SIZE] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 //! [buffers]
 
 //! [driver_instances]
@@ -107,7 +114,11 @@ struct at25dfx_chip_module at25dfx_chip;
 
 // END OF FLASH CHIP CONFIG
 
-
+// have we downloaded CRC
+static int crc_status = 0;
+// 0 - Need to download
+// 1 - File does not exist
+// 2 - Done downloading
 // File download processing state.
 static download_state down_state = NOT_READY;
 // instance of uart module
@@ -136,9 +147,6 @@ void configure_usart(void)
 	config_usart.pinmux_pad1 = PINMUX_UNUSED;
 	config_usart.pinmux_pad2 = PINMUX_PB10D_SERCOM4_PAD2;
 	config_usart.pinmux_pad3 = PINMUX_PB11D_SERCOM4_PAD3;
-	//while (usart_init(&usart_instance,
-	//SERCOM4, &config_usart) != STATUS_OK) {
-	//}
 	stdio_serial_init(&usart_instance, SERCOM4, &config_usart);
 	usart_enable(&usart_instance);
 }
@@ -195,7 +203,7 @@ static inline bool is_state_set(download_state mask)
  */
 static void store_file_packet(char *data, uint32_t length)
 {
-  
+
 	//FRESULT ret;
 	if ((data == NULL) || (length < 1)) {
 		printf("store_file_packet: empty data.\r\n");
@@ -207,6 +215,15 @@ static void store_file_packet(char *data, uint32_t length)
 		http_page_num = 0;
 		add_state(DOWNLOADING);
 	}
+
+  if (crc_status == 0) {
+    printf("Saving CRC");
+    // downloading crc
+    memcpy(&download_header, data, length);
+    clear_state(DOWNLOADING);
+    add_state(COMPLETED);
+    return;
+  }
 
 	if (data != NULL) {
 		if (length < MAIN_BUFFER_MAX_SIZE && http_overflow_length == 0) {
@@ -240,7 +257,7 @@ static void store_file_packet(char *data, uint32_t length)
 			printf("full buffer");
 			// we received a full buffer
 			at25dfx_chip_write_buffer(&at25dfx_chip, (http_page_num * MAIN_BUFFER_MAX_SIZE) + 0x10000, data, MAIN_BUFFER_MAX_SIZE);
-			http_page_num++;			
+			http_page_num++;
 		}
 		unsigned int wsize = length;
 		//ret = f_write(&file_object, (const void *)data, length, &wsize);
@@ -290,8 +307,16 @@ static void start_download(void)
 	}
 
 	/* Send the HTTP request. */
-	printf("start_download: sending HTTP request...\r\n");
-	http_client_send_request(&http_client_module_inst, MAIN_HTTP_FILE_URL, HTTP_METHOD_GET, NULL, NULL);
+  if (crc_status == 0) {
+    printf("start_download: sending HTTP request...\r\n");
+    http_client_send_request(&http_client_module_inst, CRC_FILE_URL, HTTP_METHOD_GET, NULL, NULL);
+  } else if (crc_status == 1) {
+    printf("CRC_FILE not found on server\r\n");
+    return;
+  } else {
+    printf("Downloading binary file\r\n");
+    http_client_send_request(&http_client_module_inst, BINARY_FILE_URL, HTTP_METHOD_GET, NULL, NULL);
+  }
 }
 
 /**
@@ -323,6 +348,7 @@ static void http_client_callback(struct http_client_module *module_inst, int typ
 		}
 		else {
 			add_state(CANCELED);
+			crc_status = 1;
 			return;
 		}
 		if (data->recv_response.content_length <= MAIN_BUFFER_MAX_SIZE) {
@@ -507,7 +533,7 @@ static void at25dfx_init(void)
 
   spi_init(&at25dfx_spi, AT25DFX_SPI, &at25dfx_spi_config);
   spi_enable(&at25dfx_spi);
-  
+
   //! [spi_setup]
 
   //! [chip_setup]
@@ -523,13 +549,12 @@ static void at25dfx_init(void)
 
 void flash_startup() {
 	at25dfx_chip_wake(&at25dfx_chip);
-  
+
 	if (at25dfx_chip_check_presence(&at25dfx_chip) != STATUS_OK) {
 		printf("Flash chip unresponsive\r\n");
 	}
 	at25dfx_chip_set_global_sector_protect(&at25dfx_chip, false);
-	at25dfx_chip_set_sector_protect(&at25dfx_chip, 0x10000, false);	
-	at25dfx_chip_erase_block(&at25dfx_chip, 0x10000, AT25DFX_BLOCK_SIZE_64KB); // erase bottom 64k
+	at25dfx_chip_set_sector_protect(&at25dfx_chip, 0x10000, false);
 }
 
 void flash_shutdown() {
@@ -543,6 +568,20 @@ void configure_nvm(void)
 	nvm_get_config_defaults(&config_nvm);
 	config_nvm.manual_page_write = false;
 	nvm_set_config(&config_nvm);
+}
+
+void run_app() {
+  printf ("Running application");
+
+  // infinite loop
+  while (1);
+}
+
+int check_version_number() {
+    // read the flash and check if the crc's match
+    firmware_header flash_fh;
+    at25dfx_chip_read_buffer(&at25dfx_chip, 0x0, &flash_fh, sizeof(firmware_header));
+    return (download_header.crc == flash_fh.crc);
 }
 
 int main (void)
@@ -567,7 +606,7 @@ int main (void)
 	// init delay
 	delay_init();
 	//enable interrupts
-	system_interrupt_enable_global();	
+	system_interrupt_enable_global();
 	// init timer
 	configure_timer();
 	// initialize http client service
@@ -576,6 +615,10 @@ int main (void)
 	nm_bsp_init();
 	// Initialize Wi-Fi parameters structure.
 	memset((uint8_t *)&param, 0, sizeof(tstrWifiInitParam));
+
+	//TODO DELETE ME
+//	at25dfx_chip_erase_block(&at25dfx_chip, 0x00000, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for firmware
+
 
 	// Initialize Wi-Fi driver with data and status callbacks.
 	param.pfAppWifiCb = wifi_cb;
@@ -594,11 +637,56 @@ int main (void)
 	printf("main: connecting to WiFi AP %s...\r\n", (char *)MAIN_WLAN_SSID);
 	m2m_wifi_connect((char *)MAIN_WLAN_SSID, sizeof(MAIN_WLAN_SSID), MAIN_WLAN_AUTH, (char *)MAIN_WLAN_PSK, M2M_WIFI_CH_ALL);
 
+  // wait for crc to get downloaded
 	while (!(is_state_set(COMPLETED) || is_state_set(CANCELED))) {
 		/* Handle pending events from network controller. */
 		m2m_wifi_handle_events(NULL);
 		/* Checks the timer timeout. */
 		sw_timer_task(&swt_module_inst);
+	}
+  clear_state(COMPLETED);
+  clear_state(CANCELED);
+  clear_state(DOWNLOADING);
+  clear_state(GET_REQUESTED);
+  if (crc_status == 1) {
+    // crc_status file does not exits
+    // skip to run the app since it does not exist
+	printf("Could not get crc from server");
+    run_app();
+  } else if (check_version_number()) {
+    // if the versions match then we can simply run the app
+    run_app();
+  } 
+  at25dfx_chip_erase_block(&at25dfx_chip, 0x00000, AT25DFX_BLOCK_SIZE_64KB); // erase bottom  64k block for crc header
+  at25dfx_chip_write_buffer(&at25dfx_chip, 0x00000, &download_header, sizeof(download_header)); // save crc to flash
+  
+  // DEBUG
+  firmware_header debug_header;
+  at25dfx_chip_read_buffer(&at25dfx_chip,0x00000, &debug_header, sizeof(download_header));
+  if (debug_header.crc == download_header.crc) {
+	  printf("harder written to flash is right");
+  } else{
+	  printf("harder written to flash is right");
+  }
+  
+  // END DEBUG
+  crc_status = 2; // completed downloading crc, move on to http
+
+	// cointune on to download the firmware and reset
+	at25dfx_chip_erase_block(&at25dfx_chip, 0x10000, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for firmware
+	start_download();
+	
+	// wait for firmware to get downloaded
+	while (!(is_state_set(COMPLETED) || is_state_set(CANCELED))) {
+		/* Handle pending events from network controller. */
+		m2m_wifi_handle_events(NULL);
+		/* Checks the timer timeout. */
+		sw_timer_task(&swt_module_inst);
+	}
+	
+	if (!is_state_set(COMPLETED) && is_state_set(CANCELED)) {
+		printf("Firmware could not be downloaded");
+		run_app();
 	}
 	
 	if (http_overflow_length != 0){
@@ -612,16 +700,16 @@ int main (void)
 	//at25dfx_chip_read_buffer(&at25dfx_chip, http_page_num * 0x10000, http_overflow, http_overflow_length);
 	//printf ("%s\r\n", &http_overflow[0]);
 	flash_shutdown();
-	
+
 	// update boot status
 	enum status_code error_code;
 	boot_status status;
 	do
-    {
-        error_code = nvm_read_buffer(
-                BOOT_STATUS_ADDR,
-                (void *) &status, NVMCTRL_PAGE_SIZE);
-    } while (error_code == STATUS_BUSY);
+  {
+      error_code = nvm_read_buffer(
+              BOOT_STATUS_ADDR,
+              (void *) &status, NVMCTRL_PAGE_SIZE);
+  } while (error_code == STATUS_BUSY);
 	status.downlaoded_image = 1;
 	do
 	{
@@ -634,7 +722,7 @@ int main (void)
 		BOOT_STATUS_ADDR,
 		(void *) &status, NVMCTRL_PAGE_SIZE);
 	} while (error_code == STATUS_BUSY);
-	
+
 	usart_reset(&usart_instance);
 	system_reset();
 	while (1) {

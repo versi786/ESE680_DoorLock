@@ -45,24 +45,34 @@
 extern "C" {
 #endif
 
-/** Wi-Fi AP Settings. */
-//#define MAIN_WLAN_SSID                       "hp-setup-1" /**< Destination SSID */
-//#define MAIN_WLAN_AUTH                       M2M_WIFI_SEC_WPA_PSK /**< Security manner */
-//#define MAIN_WLAN_PSK                        "WelcomeHal" /**< Password for Destination SSID */
+//#define DETKIN
+#define HOME
+// #define HAL
 
+/** Wi-Fi AP Settings. */
+#ifdef HAL
+#define MAIN_WLAN_SSID                       "hp-setup-1" /**< Destination SSID */
+#define MAIN_WLAN_AUTH                       M2M_WIFI_SEC_WPA_PSK /**< Security manner */
+#define MAIN_WLAN_PSK                        "WelcomeHal" /**< Password for Destination SSID */
+#endif
+
+#ifdef DETKIN
 #define MAIN_WLAN_SSID                       "HP-setup-south" /**< Destination SSID */
 #define MAIN_WLAN_AUTH                       M2M_WIFI_SEC_WPA_PSK /**< Security manner */
 #define MAIN_WLAN_PSK                        "detkinlabsouth101999" /**< Password for Destination SSID */
+#endif
 
-//#define MAIN_WLAN_SSID                       "black&yellow" /**< Destination SSID */
-//#define MAIN_WLAN_AUTH                       M2M_WIFI_SEC_WPA_PSK /**< Security manner */
-//#define MAIN_WLAN_PSK                        "808s&heartbreak" /**< Password for Destination SSID */
-
+#ifdef HOME
+#define MAIN_WLAN_SSID                       "black&yellow" /**< Destination SSID */
+#define MAIN_WLAN_AUTH                       M2M_WIFI_SEC_WPA_PSK /**< Security manner */
+#define MAIN_WLAN_PSK                        "808s&heartbreak" /**< Password for Destination SSID */
+#endif
 /** IP address parsing. */
 #define IPV4_BYTE(val, index)                ((val >> (index * 8)) & 0xFF)
 
 /** Content URI for download. */
-#define MAIN_HTTP_FILE_URL                   "https://www.seas.upenn.edu/~versia/ESE680_AppCode.bin"
+#define BINARY_FILE_URL                   "https://www.seas.upenn.edu/~versia/ESE680_AppCode.bin"
+#define CRC_FILE_URL                      "https://www.seas.upenn.edu/~versia/ESE680_AppCode.crc"
 
 /** Maximum size for packet buffer. */
 #define MAIN_BUFFER_MAX_SIZE                 (4*1024)
