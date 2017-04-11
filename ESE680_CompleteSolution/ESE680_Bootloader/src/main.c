@@ -249,7 +249,7 @@ int main (void)
 			// Clear out application code that is currently in nvm
 			char arr [64] = {0};
 				
-			for (int addr = BASE_CODE_ADDR; addr < flash_header.size; addr += 256) {
+			for (int addr = BASE_CODE_ADDR; addr < BASE_CODE_ADDR + flash_header.size; addr += 256) {
 				//nvm_write_buffer(addr, (void *) arr, sizeof (char) * 64);
 				do 
 				{
