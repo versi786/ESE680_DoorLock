@@ -54,3 +54,7 @@
 
 #User Specific Files
 *.atsuo
+
+
+# CRC ignore
+crc/crc
