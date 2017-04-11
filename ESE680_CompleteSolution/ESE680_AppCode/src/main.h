@@ -45,8 +45,8 @@
 extern "C" {
 #endif
 
-//#define DETKIN
-#define HOME
+#define DETKIN
+//#define HOME
 // #define HAL
 
 /** Wi-Fi AP Settings. */
