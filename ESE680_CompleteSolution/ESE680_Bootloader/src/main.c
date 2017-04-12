@@ -264,12 +264,6 @@ int main (void)
 			int x = 1;
 			for (int addr = BASE_CODE_ADDR; addr < BASE_CODE_ADDR + flash_header.size; addr += 64) {
 				at25dfx_chip_read_buffer(&at25dfx_chip, flash_addr, (void *) arr, sizeof (char) * 64);
-				if (x) {
-					for (int i = 0; i < 64; i++) {
-						printf ("%02x ", arr[i]);
-					}
-					printf("\r\n");
-				}
 				do 
 				{
 					error_code = nvm_write_buffer(addr, (void *) arr, sizeof (char) * 64);  
@@ -303,10 +297,13 @@ int main (void)
 			
 			// compare with calculated CRC
 			uint32_t crc;
-			dsu_crc32_init();
-			if (STATUS_OK == dsu_crc32_cal(BASE_CODE_ADDR, flash_header.size, &crc))
+			//dsu_crc32_init();
+			// if (STATUS_OK == dsu_crc32_cal(BASE_CODE_ADDR, flash_header.size, &crc))
+			if (STATUS_OK != crc32_calculate(BASE_CODE_ADDR, flash_header.size, &crc)) {
+				printf("BOOTLOADER: CRC failed\r\n");
+			}
 			{
-				printf("CRC: %x from header: %x", crc, flash_header.crc);
+				printf("\r\nCRC: %x from header: %x\r\n", crc, flash_header.crc);
 				// GOOD
 				
 				//image is correctly loaded into nvm. Update the boot status
@@ -343,108 +340,9 @@ int main (void)
 					(void *) &status, NVMCTRL_PAGE_SIZE);
 				} while (error_code == STATUS_BUSY);
 				// infinite loop 
-				while(1);
-				
+				while(1);	
 			}
-			//else
-			//{
-				//at25dfx_init();
-				//// BAD -- cpoying golden image
-				//// something about copying an older working version of the code
-				////flush the nvm and read the second image from flash
-				//// Clear out application code that is currently in nvm
-				//char arr [64] = {0};
-				//for (int addr = BASE_CODE_ADDR; addr < TOP_CODE_ADDR; addr += 64) {
-					//nvm_write_buffer(addr, (void *) arr, sizeof (char) * 64);
-				//}
-				//// Need to copy program from external flash to nvm
-				//at25dfx_chip_wake(&at25dfx_chip);
-				//if (at25dfx_chip_check_presence(&at25dfx_chip) != STATUS_OK) {
-					//// Handle missing or non-responsive device
-				//}
-				//at25dfx_chip_set_global_sector_protect(&at25dfx_chip, false);
-				//at25dfx_chip_set_sector_protect(&at25dfx_chip, 0x10000, false);
-				//
-				//int flash_addr = TOP_FLASH_CODE_ADDR;
-				//for (int addr = BASE_CODE_ADDR; addr < TOP_CODE_ADDR; addr += 64) {
-					//at25dfx_chip_read_buffer(&at25dfx_chip, flash_addr, (void *) arr, sizeof (char) * 64);
-					//nvm_write_buffer(addr, (void *) arr, sizeof (char) * 64);
-					//flash_addr += 64;
-				//}
-				//// read firmware header
-				//firmware_header flash_header;
-				//at25dfx_chip_read_buffer(&at25dfx_chip, flash_addr, (void *) &flash_header, sizeof (firmware_header));
-				//
-				//// Done with reading from flash
-				//at25dfx_chip_set_global_sector_protect(&at25dfx_chip, true);
-				//at25dfx_chip_set_sector_protect(&at25dfx_chip, 0x10000, true);
-				//at25dfx_chip_sleep(&at25dfx_chip);
-				//// TODO FIX ME
-				//status = default_boot_status;
-				//do
-				//{
-					//error_code = nvm_erase_row(
-					//BOOT_STATUS_ADDR);
-				//} while (error_code == STATUS_BUSY);
-				//do
-				//{
-					//error_code = nvm_write_buffer(
-					//BOOT_STATUS_ADDR,
-					//(void *) &status, NVMCTRL_PAGE_SIZE);
-				//} while (error_code == STATUS_BUSY);
-				//usart_reset(&usart_instance);
-				//NVIC_SystemReset();
-				//
-				//// TODO IGNORING THE REST OF THIS WITH THE CRC
-				//
-				//// compare with calculated CRC
-				//uint32_t crc;
-				//dsu_crc32_init();
-				//if (STATUS_OK == dsu_crc32_cal(BASE_CODE_ADDR, BASE_CODE_ADDR-TOP_CODE_ADDR, &crc) && crc == firmware_header.crc ) { // TODO check logic
-						//// GOOD
-					//
-						////image is correctly loaded into nvm. Update the boot status
-						//status = default_boot_status;
-						//status.executing_image = firmware_header.sw_version;
-						//status.signature[0] = firmware_header.crc;
-						//do
-						//{
-							//error_code = nvm_erase_row(
-							//BOOT_STATUS_ADDR);
-						//} while (error_code == STATUS_BUSY);
-						//do
-						//{
-							//error_code = nvm_write_buffer(
-							//BOOT_STATUS_ADDR,
-							//(void *) &status, NVMCTRL_PAGE_SIZE);
-						//} while (error_code == STATUS_BUSY);
-					//
-						////NVIC_SystemReset();
-					//
-					//} 
-					//else {
-						//// BAD
-						//printf("BOOTLOADER: Firmware update failed, infinite looping");
-						//while(1);
-						////both the firmware versions in external flash are corrupted.
-						////update boot status to default.
-							//status = default_boot_status;
-							//do
-							//{
-								//error_code = nvm_erase_row(
-								//BOOT_STATUS_ADDR);
-							//} while (error_code == STATUS_BUSY);
-							//do
-							//{
-								//error_code = nvm_write_buffer(
-								//BOOT_STATUS_ADDR,
-								//(void *) &status, NVMCTRL_PAGE_SIZE);
-							//} while (error_code == STATUS_BUSY);
-							//usart_reset(&usart_instance);
-							//NVIC_SystemReset();
-					//}//end golden image copying
-				//}
-			} //end of status = downloaded_image
+		} //end of status = downloaded_image
 		 else if (status.executing_image != -1)
 		  {
 			printf("BOOTLOADER: Jumping to application code.\r\n");

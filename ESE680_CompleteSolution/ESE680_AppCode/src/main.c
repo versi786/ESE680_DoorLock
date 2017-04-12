@@ -592,7 +592,8 @@ int main (void)
 	system_init();
 	// init UART
 	configure_usart();
-	
+	//printf ("online code\r\n");
+	//while(1);
 	//while (1) {
 	//	printf("online code\r\n");
 	//}
