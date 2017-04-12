@@ -622,7 +622,7 @@ int main (void)
 	memset((uint8_t *)&param, 0, sizeof(tstrWifiInitParam));
 
 	//TODO DELETE ME
-	at25dfx_chip_erase_block(&at25dfx_chip, 0x00000, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for firmware
+	at25dfx_chip_erase_block(&at25dfx_chip, 0x00000, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for firmware header
 
 
 	// Initialize Wi-Fi driver with data and status callbacks.

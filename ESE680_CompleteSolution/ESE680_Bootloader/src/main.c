@@ -90,8 +90,7 @@ int BASE_CODE_ADDR = 0x5000; //nvm application start address
 int TOP_CODE_ADDR =  0x8000;  //nvm application end address
 #define FLASH_FIRMWARE_HEADER_ADDR 0x0000  //address of header for fw1 in external flash
 #define BASE_FLASH_CODE_ADDR 0x10000  //start address of fw 1 in external flash
-//#define TOP_FLASH_CODE_ADDR 0x13000   //start address of fw2 in in external flash
-//#define FLASH_TOP_FIRMWARE_HEADER_ADDR  0x5000  //address of header for fw2 in external flash
+#define GOLDEN_FLASH_CODE_ADDR 0x20000 // where we store the initial code that was flashed on to the uC
 #define INTEGRITY_CHECK 0xdead
 #define APP_START_ADDR 0x5000 //start address of application code in nvm (pointer to jump to in the application code)
 typedef struct bs {
@@ -226,7 +225,37 @@ int main (void)
 					BOOT_STATUS_ADDR,
 					(void *) &status, NVMCTRL_PAGE_SIZE);
 		} while (error_code == STATUS_BUSY);
-		printf("BOOTLOADER: Set default boot status\r\n");
+		
+		// save the current code that exists into the "golden image"
+		char arr [NVMCTRL_PAGE_SIZE] = {0};	
+		// wake up flash chip
+		at25dfx_init();
+		// Need to copy program from external flash to nvm
+		at25dfx_chip_wake(&at25dfx_chip);
+		if (at25dfx_chip_check_presence(&at25dfx_chip) != STATUS_OK) {
+			// Handle missing or non-responsive device
+			printf("device not present");
+		} //end if
+		at25dfx_chip_set_global_sector_protect(&at25dfx_chip, false);
+		at25dfx_chip_set_sector_protect(&at25dfx_chip, GOLDEN_FLASH_CODE_ADDR, false);
+		at25dfx_chip_erase_block(&at25dfx_chip, GOLDEN_FLASH_CODE_ADDR, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for golden firmware
+		int nvm_addr = BASE_CODE_ADDR;
+		for (int addr = GOLDEN_FLASH_CODE_ADDR; addr < (GOLDEN_FLASH_CODE_ADDR + 0x10000); addr += NVMCTRL_PAGE_SIZE) {
+			// read code out of nvm and write to flash
+			do
+			{
+				error_code = nvm_read_buffer(
+				nvm_addr,
+				(void *) arr, NVMCTRL_PAGE_SIZE);
+			} while (error_code == STATUS_BUSY);
+			at25dfx_chip_write_buffer(&at25dfx_chip, addr, arr, sizeof(arr));	
+			nvm_addr += NVMCTRL_PAGE_SIZE;
+		}
+		// Done with writing to flash
+		at25dfx_chip_set_global_sector_protect(&at25dfx_chip, true);
+		at25dfx_chip_set_sector_protect(&at25dfx_chip, GOLDEN_FLASH_CODE_ADDR, true);
+		at25dfx_chip_sleep(&at25dfx_chip);
+		printf("BOOTLOADER: Set default boot status and saved golden image\r\n");
 		usart_reset(&usart_instance);
 		NVIC_SystemReset();
 	} 
@@ -255,13 +284,18 @@ int main (void)
 				{
 					error_code = nvm_erase_row(addr);
 				} while (error_code != STATUS_OK);
+				char arr2[256];
+				do
+				{
+					nvm_read_buffer(addr, (void *) arr2, sizeof(arr2));
+				} while (error_code != STATUS_OK);
+				for (int i = 0; i < 256; i++) {
+					printf("%x", arr2[i]);
+				}
 				
 			} //end of for loop
 			
-			
-			
 			int flash_addr = BASE_FLASH_CODE_ADDR;
-			int x = 1;
 			for (int addr = BASE_CODE_ADDR; addr < BASE_CODE_ADDR + flash_header.size; addr += 64) {
 				at25dfx_chip_read_buffer(&at25dfx_chip, flash_addr, (void *) arr, sizeof (char) * 64);
 				do 
@@ -279,6 +313,7 @@ int main (void)
 				error_code = nvm_erase_row(
 				BOOT_STATUS_ADDR);
 			} while (error_code == STATUS_BUSY);
+			
 			do
 			{
 				error_code = nvm_write_buffer(
@@ -302,8 +337,8 @@ int main (void)
 			if (STATUS_OK != crc32_calculate(BASE_CODE_ADDR, flash_header.size, &crc)) {
 				printf("BOOTLOADER: CRC failed\r\n");
 			}
-			{
-				printf("\r\nCRC: %x from header: %x\r\n", crc, flash_header.crc);
+			printf("CRC atmel: %x CRC me: %x\r\n", crc, flash_header.crc);
+			if (crc == flash_header.crc) { // TODO change to false for crc testing
 				// GOOD
 				
 				//image is correctly loaded into nvm. Update the boot status
@@ -315,6 +350,14 @@ int main (void)
 					error_code = nvm_erase_row(
 					BOOT_STATUS_ADDR);
 				} while (error_code == STATUS_BUSY);
+				char arr2[256];
+				do 
+				{
+					nvm_read_buffer(BOOT_STATUS_ADDR, (void *) arr2, sizeof(arr2));
+				} while (error_code != STATUS_OK);
+				for (int i = 0; i < 256; i++) {
+					printf("%x", arr2[i]);
+				}
 					
 				do
 				{
@@ -325,22 +368,58 @@ int main (void)
 				usart_reset(&usart_instance);
 				NVIC_SystemReset();
 			} else {
-				printf("BOOTLOADER: firmware download failed, requires manual reset");
-				status = default_boot_status;
-				do
-				{
-					error_code = nvm_erase_row(
-					BOOT_STATUS_ADDR);
-				} while (error_code == STATUS_BUSY);
+				printf("BOOTLOADER: firmware download failed, loading golden image\r\n");
+				// Need to copy program from external flash to nvm
+				at25dfx_chip_wake(&at25dfx_chip);
+				if (at25dfx_chip_check_presence(&at25dfx_chip) != STATUS_OK) {
+					// Handle missing or non-responsive device
+					printf("device not present");
+				} //end if
+				at25dfx_chip_set_global_sector_protect(&at25dfx_chip, false);
+				at25dfx_chip_set_sector_protect(&at25dfx_chip, 0x10000, false);
 				
-				do
-				{
-					error_code = nvm_write_buffer(
-					BOOT_STATUS_ADDR,
-					(void *) &status, NVMCTRL_PAGE_SIZE);
-				} while (error_code == STATUS_BUSY);
-				// infinite loop 
-				while(1);	
+
+				char arr [64] = {0};
+				// Clear out application code that is currently in nvm				
+				for (int addr = BASE_CODE_ADDR; addr < (BASE_CODE_ADDR + (64 * 1024)); addr += 256) { // TODO DEBUG ME
+					//nvm_write_buffer(addr, (void *) arr, sizeof (char) * 64);
+					do
+					{
+						error_code = nvm_erase_row(addr);
+					} while (error_code != STATUS_OK);
+					char arr2[256];
+					do 
+					{
+						nvm_read_buffer(addr, (void *) arr2, sizeof(arr2));
+					} while (error_code != STATUS_OK);
+					for (int i = 0; i < 256; i++) {
+						printf("%x", arr2[i]);
+					}
+					
+				} //end of for loop
+				
+				int flash_addr = GOLDEN_FLASH_CODE_ADDR;
+				for (int addr = BASE_CODE_ADDR; addr < BASE_CODE_ADDR + (64 *1024); addr += 64) {
+					at25dfx_chip_read_buffer(&at25dfx_chip, flash_addr, (void *) arr, sizeof (char) * 64);
+					do
+					{
+						error_code = nvm_write_buffer(addr, (void *) arr, sizeof (char) * 64);
+					} while (error_code != STATUS_OK);
+					char arr2[64];
+					do
+					{
+						nvm_read_buffer(addr, (void *) arr2, sizeof(arr2));
+					} while (error_code != STATUS_OK);
+					for (int i = 0; i < 64; i++) {
+						if(arr[i] != arr2[i]) {
+							printf ("DONT MATCH %d \r\n", i);
+						}
+					}
+					
+					flash_addr += 64;
+				} //end for
+				usart_reset(&usart_instance);
+				NVIC_SystemReset();
 			}
 		} //end of status = downloaded_image
 		 else if (status.executing_image != -1)
