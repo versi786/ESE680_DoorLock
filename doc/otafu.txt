@@ -1,0 +1,22 @@
+Aasif Versi, Shveta Gupta, Kamenee Arumugam
+
+Overview of Bootloader:
+         When the bootloader initially starts up, it sets up the correct headers that we use to check whether or not we need to install a new version of firmware. The bootloader then resets and is able ot jump to the application. If the bootloader is run after the application has downloaded new firmware, it can over write the application that is currently in the nvm.
+
+Memory map on NVM:
+0x0 -> Bootloader
+0x4000 -> Boot status
+0x 5000 -> Application code
+
+Memory map on flash:
+0x0 -> Firmware header, includes crc and version numbers
+0x10000 -> Application code
+0x20000 -> Golden image
+
+Basic bootloader funtionality:
+      Can download and run downloaded code
+      Checks to see if new Code is available for download using the crc as an ID for each firmware
+      Video: https://goo.gl/photos/iNhZJcCXsibfWPEy7
+ Revert to golden code:
+        The bootloader checks to see if the code we have loaded to the nvm has the correct crc. If it does not, it copies over the golden image from when it was originally programmed by the user.
+      Video: https://goo.gl/photos/C8GE1WsJv2Vf8LG57
