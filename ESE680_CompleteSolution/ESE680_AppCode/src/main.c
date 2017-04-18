@@ -35,6 +35,8 @@
 #include "driver/include/m2m_wifi.h"
 #include "socket/include/socket.h"
 #include "iot/http/http_client.h"
+#include "iot/mqtt/mqtt.h"
+
 #define LED0_ACTIVE               false
 #define LED0_INACTIVE             !LED0_ACTIVE
 // MEMORY MAP
@@ -137,17 +139,71 @@ char http_overflow[MAIN_BUFFER_MAX_SIZE];
 int http_overflow_length = 0;
 int http_page_num = 1;
 
+/** User name of chat. */
+char mqtt_user[] = "sam";
+
+/** Password of chat. */
+char mqtt_pass[] = "sam";
+
+/** Publishing text. */
+char pub_text[64] = "";
+
+/* Instance of MQTT service. */
+static struct mqtt_module mqtt_inst;
+
+/* Receive buffer of the MQTT service. */
+static char mqtt_buffer[MAIN_MQTT_BUFFER_SIZE];
+
+/** UART buffer. */
+static char uart_buffer[MAIN_CHAT_BUFFER_SIZE];
+
+/** Written size of UART buffer. */
+static int uart_buffer_written = 0;
+
+/** A buffer of character from the serial. */
+static uint16_t uart_ch_buffer;
+
+
+volatile int status;
+uint8_t buttonLevel;
+
+/**
+ * \brief Callback of USART input.
+ *
+ * \param[in] module USART module structure.
+ */
+static void uart_callback(const struct usart_module *const module)
+{
+	/* If input string is bigger than buffer size limit, ignore the excess part. */
+	if (uart_buffer_written < MAIN_CHAT_BUFFER_SIZE) {
+		uart_buffer[uart_buffer_written++] = uart_ch_buffer & 0xFF;
+	}
+}
+
 void configure_usart(void)
 {
 	struct usart_config config_usart;
 	usart_get_config_defaults(&config_usart);
 	config_usart.baudrate    = 115200;
+	#ifdef XPLAINED_BOARD
 	config_usart.mux_setting = USART_RX_3_TX_2_XCK_3;
 	config_usart.pinmux_pad0 = PINMUX_UNUSED;
 	config_usart.pinmux_pad1 = PINMUX_UNUSED;
 	config_usart.pinmux_pad2 = PINMUX_PB10D_SERCOM4_PAD2;
 	config_usart.pinmux_pad3 = PINMUX_PB11D_SERCOM4_PAD3;
 	stdio_serial_init(&usart_instance, SERCOM4, &config_usart);
+	#endif
+	#ifndef XPLAINED_BOARD
+	config_usart.mux_setting = USART_RX_3_TX_2_XCK_3;
+	config_usart.pinmux_pad0 = PINMUX_UNUSED;
+	config_usart.pinmux_pad1 = PINMUX_UNUSED;
+	config_usart.pinmux_pad2 = PINMUX_PA20D_SERCOM3_PAD2;
+	config_usart.pinmux_pad3 = PINMUX_PA21D_SERCOM3_PAD3;
+	stdio_serial_init(&usart_instance, SERCOM3, &config_usart);
+	#endif
+	
+	/* Register USART callback for receiving user input. */
+	usart_register_callback(&usart_instance, (usart_callback_t)uart_callback, USART_CALLBACK_BUFFER_RECEIVED);
 	usart_enable(&usart_instance);
 }
 
@@ -389,6 +445,69 @@ static void http_client_callback(struct http_client_module *module_inst, int typ
 		break;
 	}
 }
+
+/**
+ * \brief Callback to get the Wi-Fi status update.
+ *
+ * \param[in] msg_type type of Wi-Fi notification. Possible types are:
+ *  - [M2M_WIFI_RESP_CURRENT_RSSI](@ref M2M_WIFI_RESP_CURRENT_RSSI)
+ *  - [M2M_WIFI_RESP_CON_STATE_CHANGED](@ref M2M_WIFI_RESP_CON_STATE_CHANGED)
+ *  - [M2M_WIFI_RESP_CONNTION_STATE](@ref M2M_WIFI_RESP_CONNTION_STATE)
+ *  - [M2M_WIFI_RESP_SCAN_DONE](@ref M2M_WIFI_RESP_SCAN_DONE)
+ *  - [M2M_WIFI_RESP_SCAN_RESULT](@ref M2M_WIFI_RESP_SCAN_RESULT)
+ *  - [M2M_WIFI_REQ_WPS](@ref M2M_WIFI_REQ_WPS)
+ *  - [M2M_WIFI_RESP_IP_CONFIGURED](@ref M2M_WIFI_RESP_IP_CONFIGURED)
+ *  - [M2M_WIFI_RESP_IP_CONFLICT](@ref M2M_WIFI_RESP_IP_CONFLICT)
+ *  - [M2M_WIFI_RESP_P2P](@ref M2M_WIFI_RESP_P2P)
+ *  - [M2M_WIFI_RESP_AP](@ref M2M_WIFI_RESP_AP)
+ *  - [M2M_WIFI_RESP_CLIENT_INFO](@ref M2M_WIFI_RESP_CLIENT_INFO)
+ * \param[in] pvMsg A pointer to a buffer containing the notification parameters
+ * (if any). It should be casted to the correct data type corresponding to the
+ * notification type. Existing types are:
+ *  - tstrM2mWifiStateChanged
+ *  - tstrM2MWPSInfo
+ *  - tstrM2MP2pResp
+ *  - tstrM2MAPResp
+ *  - tstrM2mScanDone
+ *  - tstrM2mWifiscanResult
+ */
+static void wifi_callback(uint8 msg_type, void *msg_data)
+{
+	tstrM2mWifiStateChanged *msg_wifi_state;
+	uint8 *msg_ip_addr;
+
+	switch (msg_type) {
+	case M2M_WIFI_RESP_CON_STATE_CHANGED:
+		msg_wifi_state = (tstrM2mWifiStateChanged *)msg_data;
+		if (msg_wifi_state->u8CurrState == M2M_WIFI_CONNECTED) {
+			/* If Wi-Fi is connected. */
+			printf("Wi-Fi connected\r\n");
+			m2m_wifi_request_dhcp_client();
+		} else if (msg_wifi_state->u8CurrState == M2M_WIFI_DISCONNECTED) {
+			/* If Wi-Fi is disconnected. */
+			printf("Wi-Fi disconnected\r\n");
+			m2m_wifi_connect((char *)MAIN_WLAN_SSID, sizeof(MAIN_WLAN_SSID),
+					MAIN_WLAN_AUTH, (char *)MAIN_WLAN_PSK, M2M_WIFI_CH_ALL);
+			/* Disconnect from MQTT broker. */
+			/* Force close the MQTT connection, because cannot send a disconnect message to the broker when network is broken. */
+			mqtt_disconnect(&mqtt_inst, 1);
+		}
+
+		break;
+
+	case M2M_WIFI_REQ_DHCP_CONF:
+		msg_ip_addr = (uint8 *)msg_data;
+		printf("Wi-Fi IP is %u.%u.%u.%u\r\n",
+				msg_ip_addr[0], msg_ip_addr[1], msg_ip_addr[2], msg_ip_addr[3]);
+		/* Try to connect to MQTT broker when Wi-Fi was connected. */
+		mqtt_connect(&mqtt_inst, main_mqtt_broker);
+		break;
+
+	default:
+		break;
+	}
+}
+
 /**
  * \brief Callback to get the Wi-Fi status update.
  *
@@ -455,6 +574,39 @@ static void wifi_cb(uint8_t u8MsgType, void *pvMsg)
 	default:
 		break;
 	}
+}
+
+
+
+/**
+ * \brief Callback to get the Socket event.
+ *
+ * \param[in] Socket descriptor.
+ * \param[in] msg_type type of Socket notification. Possible types are:
+ *  - [SOCKET_MSG_CONNECT](@ref SOCKET_MSG_CONNECT)
+ *  - [SOCKET_MSG_BIND](@ref SOCKET_MSG_BIND)
+ *  - [SOCKET_MSG_LISTEN](@ref SOCKET_MSG_LISTEN)
+ *  - [SOCKET_MSG_ACCEPT](@ref SOCKET_MSG_ACCEPT)
+ *  - [SOCKET_MSG_RECV](@ref SOCKET_MSG_RECV)
+ *  - [SOCKET_MSG_SEND](@ref SOCKET_MSG_SEND)
+ *  - [SOCKET_MSG_SENDTO](@ref SOCKET_MSG_SENDTO)
+ *  - [SOCKET_MSG_RECVFROM](@ref SOCKET_MSG_RECVFROM)
+ * \param[in] msg_data A structure contains notification informations.
+ */
+static void socket_event_handler(SOCKET sock, uint8_t msg_type, void *msg_data)
+{
+	mqtt_socket_event_handler(sock, msg_type, msg_data);
+}
+
+/**
+ * \brief Callback of gethostbyname function.
+ *
+ * \param[in] doamin_name Domain name.
+ * \param[in] server_ip IP of server.
+ */
+static void socket_resolve_handler(uint8_t *doamin_name, uint32_t server_ip)
+{
+	mqtt_socket_resolve_handler(doamin_name, server_ip);
 }
 
 /**
@@ -570,8 +722,193 @@ void configure_nvm(void)
 	nvm_set_config(&config_nvm);
 }
 
+
+/**
+ * \brief Callback to get the MQTT status update.
+ *
+ * \param[in] conn_id instance id of connection which is being used.
+ * \param[in] type type of MQTT notification. Possible types are:
+ *  - [MQTT_CALLBACK_SOCK_CONNECTED](@ref MQTT_CALLBACK_SOCK_CONNECTED)
+ *  - [MQTT_CALLBACK_CONNECTED](@ref MQTT_CALLBACK_CONNECTED)
+ *  - [MQTT_CALLBACK_PUBLISHED](@ref MQTT_CALLBACK_PUBLISHED)
+ *  - [MQTT_CALLBACK_SUBSCRIBED](@ref MQTT_CALLBACK_SUBSCRIBED)
+ *  - [MQTT_CALLBACK_UNSUBSCRIBED](@ref MQTT_CALLBACK_UNSUBSCRIBED)
+ *  - [MQTT_CALLBACK_DISCONNECTED](@ref MQTT_CALLBACK_DISCONNECTED)
+ *  - [MQTT_CALLBACK_RECV_PUBLISH](@ref MQTT_CALLBACK_RECV_PUBLISH)
+ * \param[in] data A structure contains notification informations. @ref mqtt_data
+ */
+static void mqtt_callback(struct mqtt_module *module_inst, int type, union mqtt_data *data)
+{
+	switch (type) {
+	case MQTT_CALLBACK_SOCK_CONNECTED:
+	{
+		/*
+		 * If connecting to broker server is complete successfully, Start sending CONNECT message of MQTT.
+		 * Or else retry to connect to broker server.
+		 */
+		if (data->sock_connected.result >= 0) {
+			//mqtt_connect_broker(module_inst, 1, NULL, NULL, mqtt_user, NULL, NULL, 0, 0, 0);
+      status = mqtt_connect_broker(module_inst, 1, mqtt_user, mqtt_pass, mqtt_user, NULL, NULL, 0, 0, 0);
+		} else {
+			printf("Connect fail to server(%s)! retry it automatically.\r\n", main_mqtt_broker);
+			mqtt_connect(module_inst, main_mqtt_broker); /* Retry that. */
+		}
+	}
+	break;
+
+	case MQTT_CALLBACK_CONNECTED:
+		if (data->connected.result == MQTT_CONN_RESULT_ACCEPT) {
+			/* Subscribe chat topic. */
+      delay_ms(1000);
+			status = mqtt_subscribe(module_inst, MAIN_CHAT_TOPIC, 2);
+      status = mqtt_subscribe(module_inst, SENSOR_TOPIC, 2);
+      status = mqtt_subscribe(module_inst, ACTUATOR_TOPIC, 2);
+			/* Enable USART receiving callback. */
+			usart_enable_callback(&usart_instance, USART_CALLBACK_BUFFER_RECEIVED);
+			printf("Preparation of the chat has been completed.\r\n");
+		} else {
+			/* Cannot connect for some reason. */
+			printf("MQTT broker decline your access! error code %d\r\n", data->connected.result);
+		}
+
+		break;
+
+	case MQTT_CALLBACK_RECV_PUBLISH:
+		/* You received publish message which you had subscribed. */
+		if (data->recv_publish.topic != NULL && data->recv_publish.msg != NULL) {
+      
+      
+      /// Main Topic
+			if (!strncmp(data->recv_publish.topic, MAIN_CHAT_TOPIC, strlen(MAIN_CHAT_TOPIC)) ) {
+        /* Print Topic */
+        printf("%s >> ", MAIN_CHAT_TOPIC);
+        
+        /* Print message */
+        for (int i = 0; i < data->recv_publish.msg_size; i++) {
+          printf("%c", data->recv_publish.msg[i]);
+        }
+        printf("\r\n");
+			}
+      
+      /// Sensor Topic
+      if (!strncmp(data->recv_publish.topic, SENSOR_TOPIC, strlen(SENSOR_TOPIC)) ) {
+        /* Print Topic */
+        printf("%s >> ", SENSOR_TOPIC);
+        
+        /* Print message */
+        for (int i = 0; i < data->recv_publish.msg_size; i++) {
+          printf("%c", data->recv_publish.msg[i]);
+        }
+        printf("\r\n");
+      }
+      
+      /// Actuator Topic
+      if (!strncmp(data->recv_publish.topic, ACTUATOR_TOPIC, strlen(ACTUATOR_TOPIC)) ) {
+        /* Print Topic */
+        printf("%s >> ", ACTUATOR_TOPIC);
+       
+        /* Print message */
+        for (int i = 0; i < data->recv_publish.msg_size; i++) {
+          printf("%c", data->recv_publish.msg[i]);
+        }
+        printf("\r\n");
+      }
+      
+		}
+
+		break;
+
+	case MQTT_CALLBACK_DISCONNECTED:
+		/* Stop timer and USART callback. */
+		printf("MQTT disconnected\r\n");
+		usart_disable_callback(&usart_instance, USART_CALLBACK_BUFFER_RECEIVED);
+		break;
+	}
+}
+
+static void configure_mqtt(void)
+{
+	struct mqtt_config mqtt_conf;
+	int result;
+
+	mqtt_get_config_defaults(&mqtt_conf);
+	/* To use the MQTT service, it is necessary to always set the buffer and the timer. */
+	mqtt_conf.timer_inst = &swt_module_inst;
+	mqtt_conf.recv_buffer = mqtt_buffer;
+	mqtt_conf.recv_buffer_size = MAIN_MQTT_BUFFER_SIZE;
+	mqtt_conf.port = MQTT_PORT;
+
+	result = mqtt_init(&mqtt_inst, &mqtt_conf);
+	if (result < 0) {
+		printf("MQTT initialization failed. Error code is (%d)\r\n", result);
+		while (1) {
+		}
+	}
+
+	result = mqtt_register_callback(&mqtt_inst, mqtt_callback);
+	if (result < 0) {
+		printf("MQTT register callback failed. Error code is (%d)\r\n", result);
+		while (1) {
+		}
+	}
+}
+
+/**
+ * \brief Checking the USART buffer.
+ *
+ * Finding the new line character(\n or \r\n) in the USART buffer.
+ * If buffer was overflowed, Sending the buffer.
+ */
+static void check_usart_buffer(char *topic)
+{
+	int i;
+
+	/* Publish the input string when newline was received or input string is bigger than buffer size limit. */
+	if (uart_buffer_written >= MAIN_CHAT_BUFFER_SIZE) {
+		mqtt_publish(&mqtt_inst, topic, uart_buffer, MAIN_CHAT_BUFFER_SIZE, 0, 0);
+		uart_buffer_written = 0;
+	} else {
+		for (i = 0; i < uart_buffer_written; i++) {
+			/* Find newline character ('\n' or '\r\n') and publish the previous string . */
+			if (uart_buffer[i] == '\n') {
+				mqtt_publish(&mqtt_inst, topic, uart_buffer, (i > 0 && uart_buffer[i - 1] == '\r') ? i - 1 : i, 0, 0);
+				/* Move remain data to start of the buffer. */
+				if (uart_buffer_written > i + 1) {
+					memmove(uart_buffer, uart_buffer + i + 1, uart_buffer_written - i - 1);
+					uart_buffer_written = uart_buffer_written - i - 1;
+				} else {
+					uart_buffer_written = 0;
+				}
+
+				break;
+			}
+		}
+	}
+}
 void run_app() {
   printf ("Running LOCAL application\r\n");
+  
+  while (1) {
+	  /* Handle pending events from network controller. */
+	  sint8 wifiStatus = m2m_wifi_handle_events(NULL);
+	  /* Try to read user input from USART. */
+	  usart_read_job(&usart_instance, &uart_ch_buffer);
+	  /* Checks the timer timeout. */
+	  sw_timer_task(&swt_module_inst);
+	  
+	  if( port_pin_get_input_level(LEFT_BUTTON_PIN) != buttonLevel )
+	  {
+		  //int mqtt_publish(struct mqtt_module *const module, const char *topic, const char *msg, uint32_t msg_len, uint8_t qos, uint8_t retain);
+		  buttonLevel = port_pin_get_input_level(LEFT_BUTTON_PIN);
+		  sprintf(pub_text, "%d", buttonLevel);
+		  mqtt_publish(&mqtt_inst, SENSOR_TOPIC, pub_text, 1, 2, 1);
+		  delay_ms(300);
+	  }
+	  
+	  
+	  /* Checks the USART buffer. */
+	  check_usart_buffer(MAIN_CHAT_TOPIC);
+  }
 
   // infinite loop
   while (1);
@@ -588,6 +925,7 @@ int main (void)
 {
 	tstrWifiInitParam param;
 	int8_t ret;
+	char topic[strlen(MAIN_CHAT_TOPIC) + MAIN_CHAT_USER_NAME_SIZE + 1];
 	// init board
 	system_init();
 	// init UART
@@ -622,7 +960,7 @@ int main (void)
 	memset((uint8_t *)&param, 0, sizeof(tstrWifiInitParam));
 
 	//TODO DELETE ME
-	at25dfx_chip_erase_block(&at25dfx_chip, 0x00000, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for firmware header
+	// at25dfx_chip_erase_block(&at25dfx_chip, 0x00000, AT25DFX_BLOCK_SIZE_64KB); // erase 64k block for firmware header
 
 
 	// Initialize Wi-Fi driver with data and status callbacks.
@@ -658,7 +996,51 @@ int main (void)
     // skip to run the app since it does not exist
 	printf("Could not get crc from server");
     run_app();
-  } else if (check_version_number()) {
+  } else if (check_version_number() || true) {
+	// tear down the http instance, cant run http and mqtt at the same time
+	ret = http_client_unregister_callback (&http_client_module_inst);
+	if (ret < 0) {
+		printf("Could not deregister callback");
+		while(1);
+	}
+	ret = http_client_deinit(&http_client_module_inst);
+	if (ret < 0) {
+		printf("Could not tear down http client");
+		while(1);
+	}
+	
+	//teardown wifi interface and reconnect
+	/* Initialize Wi-Fi parameters structure. */
+	memset((uint8_t *)&param, 0, sizeof(tstrWifiInitParam));
+
+	m2m_wifi_deinit(&param);
+	/* Initialize Wi-Fi parameters structure. */
+	memset((uint8_t *)&param, 0, sizeof(tstrWifiInitParam));
+
+	/* Initialize Wi-Fi driver with data and status callbacks. */
+	param.pfAppWifiCb = wifi_callback; /* Set Wi-Fi event callback. */
+	ret = m2m_wifi_init(&param);
+	if (M2M_SUCCESS != ret) {
+		printf("main: m2m_wifi_init call error!(%d)\r\n", ret);
+		while (1) { /* Loop forever. */
+		}
+	}
+	
+	
+	// change socket callbacks
+	socketDeinit();
+	socketInit();
+	registerSocketCallback(socket_event_handler, socket_resolve_handler);
+	
+	/* Connect to router. */
+	m2m_wifi_connect((char *)MAIN_WLAN_SSID, sizeof(MAIN_WLAN_SSID),
+	MAIN_WLAN_AUTH, (char *)MAIN_WLAN_PSK, M2M_WIFI_CH_ALL);
+	// initialize MQTT service
+	configure_mqtt();
+	printf("User: %s\r\n", mqtt_user);
+	printf("Password: %s\r\n", mqtt_user);
+	sprintf(topic, "%s", MAIN_CHAT_TOPIC);
+	printf("Topic : %s\r\n", topic);
     // if the versions match then we can simply run the app
     run_app();
   } 

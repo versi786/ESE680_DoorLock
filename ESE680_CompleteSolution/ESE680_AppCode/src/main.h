@@ -93,6 +93,35 @@ typedef enum {
 	CANCELED = 0x20 /*!< Download canceled. */
 } download_state;
 
+/* Max size of UART buffer. */
+#define MAIN_CHAT_BUFFER_SIZE 64
+
+/* Max size of MQTT buffer. */
+#define MAIN_MQTT_BUFFER_SIZE 128
+
+/* Limitation of user name. */
+#define MAIN_CHAT_USER_NAME_SIZE 64
+
+/* Limitation of password. */
+#define MAIN_CHAT_PASSWORD_SIZE 64
+
+/* Chat MQTT topic. */
+#define MAIN_CHAT_TOPIC "ese680/main/"
+#define SENSOR_TOPIC    "ese680/sensor/"
+#define ACTUATOR_TOPIC  "ese680/actuator/"
+
+#define MQTT_PORT       16625
+
+/*
+ * A MQTT broker server which was connected.
+ * m2m.eclipse.org is public MQTT broker.
+ */
+static const char main_mqtt_broker[] = "m11.cloudmqtt.com";
+
+#define LEFT_BUTTON_PIN PORT_PA09
+#define LED_PIN PORT_PA17  
+#define LED2_PIN PORT_PA22  
+
 #ifdef __cplusplus
 }
 #endif

@@ -41,7 +41,7 @@
 #define CONF_SW_TIMER_H_INCLUDED
 
 /* Maximum timer count. */
-#define CONF_SW_TIMER_COUNT                1
+#define CONF_SW_TIMER_COUNT                2
 
 /* Maximum timer count. */
 #define CONF_SW_TIMER_CALLBACK_CHANNEL     0

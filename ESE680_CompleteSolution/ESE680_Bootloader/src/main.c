@@ -172,15 +172,23 @@ void configure_usart(void)
 	struct usart_config config_usart;
 	usart_get_config_defaults(&config_usart);
 	config_usart.baudrate    = 115200;
+	#ifdef XPLAINED_BOARD
 	config_usart.mux_setting = USART_RX_3_TX_2_XCK_3;
 	config_usart.pinmux_pad0 = PINMUX_UNUSED;
 	config_usart.pinmux_pad1 = PINMUX_UNUSED;
 	config_usart.pinmux_pad2 = PINMUX_PB10D_SERCOM4_PAD2;
 	config_usart.pinmux_pad3 = PINMUX_PB11D_SERCOM4_PAD3;
-	//while (usart_init(&usart_instance,
-	//SERCOM4, &config_usart) != STATUS_OK) {
-	//}
 	stdio_serial_init(&usart_instance, SERCOM4, &config_usart);
+	#endif
+	#ifndef XPLAINED_BOARD
+	config_usart.mux_setting = USART_RX_3_TX_2_XCK_3;
+	config_usart.pinmux_pad0 = PINMUX_UNUSED;
+	config_usart.pinmux_pad1 = PINMUX_UNUSED;
+	config_usart.pinmux_pad2 = PINMUX_PA20D_SERCOM3_PAD2;
+	config_usart.pinmux_pad3 = PINMUX_PA21D_SERCOM3_PAD3;
+	stdio_serial_init(&usart_instance, SERCOM3, &config_usart);
+	#endif
+	
 	usart_enable(&usart_instance);
 }
 
