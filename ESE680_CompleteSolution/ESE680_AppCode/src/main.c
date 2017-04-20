@@ -166,6 +166,7 @@ static uint16_t uart_ch_buffer;
 
 volatile int status;
 uint8_t buttonLevel;
+bool actuator_state = false;
 
 /**
  * \brief Callback of USART input.
@@ -812,6 +813,7 @@ static void mqtt_callback(struct mqtt_module *module_inst, int type, union mqtt_
           printf("%c", data->recv_publish.msg[i]);
         }
         printf("\r\n");
+		actuator_state = data->recv_publish.msg[0] == '1';
       }
       
 		}
@@ -887,7 +889,16 @@ static void check_usart_buffer(char *topic)
 }
 void run_app() {
   printf ("Running LOCAL application\r\n");
+  struct port_config pc;
+  port_get_config_defaults(&pc);
+  pc.input_pull = PORT_PIN_PULL_NONE;
+  port_pin_set_config(LEFT_BUTTON_PIN, &pc);
   
+  port_get_config_defaults(&pc);
+  pc.direction = PORT_PIN_DIR_OUTPUT;
+  port_pin_set_config(LED_PIN, &pc);
+  
+  int8_t old_level;
   while (1) {
 	  /* Handle pending events from network controller. */
 	  sint8 wifiStatus = m2m_wifi_handle_events(NULL);
@@ -895,15 +906,19 @@ void run_app() {
 	  usart_read_job(&usart_instance, &uart_ch_buffer);
 	  /* Checks the timer timeout. */
 	  sw_timer_task(&swt_module_inst);
-	  
-	  if( port_pin_get_input_level(LEFT_BUTTON_PIN) != buttonLevel )
+	  int8_t level = port_pin_get_input_level(LEFT_BUTTON_PIN);
+	  if( level == true && old_level == false )
 	  {
 		  //int mqtt_publish(struct mqtt_module *const module, const char *topic, const char *msg, uint32_t msg_len, uint8_t qos, uint8_t retain);
-		  buttonLevel = port_pin_get_input_level(LEFT_BUTTON_PIN);
+		  buttonLevel = !buttonLevel;
 		  sprintf(pub_text, "%d", buttonLevel);
-		  mqtt_publish(&mqtt_inst, SENSOR_TOPIC, pub_text, 1, 2, 1);
+		  mqtt_publish(&mqtt_inst, SENSOR_TOPIC, pub_text, 1, 1, 1);
 		  delay_ms(300);
 	  }
+	  old_level = level;
+	  
+	  //set led to actuator value
+	  port_pin_set_output_level(LED_PIN, actuator_state);
 	  
 	  
 	  /* Checks the USART buffer. */
@@ -928,6 +943,7 @@ int main (void)
 	char topic[strlen(MAIN_CHAT_TOPIC) + MAIN_CHAT_USER_NAME_SIZE + 1];
 	// init board
 	system_init();
+	
 	// init UART
 	configure_usart();
 	//printf ("online code\r\n");

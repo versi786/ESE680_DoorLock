@@ -118,9 +118,9 @@ typedef enum {
  */
 static const char main_mqtt_broker[] = "m11.cloudmqtt.com";
 
-#define LEFT_BUTTON_PIN PORT_PA09
-#define LED_PIN PORT_PA17  
-#define LED2_PIN PORT_PA22  
+#define LEFT_BUTTON_PIN		PIN_PA09
+#define LED_PIN				PIN_PA17  
+#define LED2_PIN			PIN_PA22  
 
 #ifdef __cplusplus
 }
