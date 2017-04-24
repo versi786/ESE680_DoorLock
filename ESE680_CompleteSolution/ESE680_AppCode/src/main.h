@@ -120,7 +120,9 @@ static const char main_mqtt_broker[] = "m11.cloudmqtt.com";
 
 #define LEFT_BUTTON_PIN		PIN_PA09
 #define LED_PIN				PIN_PA17  
-#define LED2_PIN			PIN_PA22  
+#define LED2_PIN			PIN_PA22 
+#define PING_PIN			PIN_PA10
+#define PING_IN_PIN			PIN_PA08
 
 #ifdef __cplusplus
 }

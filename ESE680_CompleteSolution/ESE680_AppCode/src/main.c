@@ -168,6 +168,13 @@ volatile int status;
 uint8_t buttonLevel;
 bool actuator_state = false;
 
+//PWM
+#define CONF_PWM_MODULE TCC1
+#define CONF_PWM_CHANNEL 1
+#define CONF_PWM_OUTPUT 1
+#define CONF_PWM_OUT_PIN PIN_PA11E_TCC1_WO1
+#define CONF_PWM_OUT_MUX MUX_PA11E_TCC1_WO1
+
 /**
  * \brief Callback of USART input.
  *
@@ -887,6 +894,145 @@ static void check_usart_buffer(char *topic)
 		}
 	}
 }
+
+struct tcc_module tcc_instance;
+
+void servo_stop() {
+	tcc_disable(&tcc_instance); 
+	return;
+	
+	// PWM  Stopped 
+	struct tcc_config config_tcc;
+	tcc_get_config_defaults(&config_tcc, CONF_PWM_MODULE);
+	config_tcc.counter.clock_prescaler = TCC_CLOCK_PRESCALER_DIV16;
+	config_tcc.counter.period = 0xFFFF;
+	config_tcc.compare.wave_generation = TCC_WAVE_GENERATION_SINGLE_SLOPE_PWM;
+	config_tcc.compare.match[CONF_PWM_CHANNEL] = (0xFFFF / 100 * 7);
+	config_tcc.pins.enable_wave_out_pin[CONF_PWM_OUTPUT] = true;
+	config_tcc.pins.wave_out_pin[CONF_PWM_OUTPUT]        = CONF_PWM_OUT_PIN;
+	config_tcc.pins.wave_out_pin_mux[CONF_PWM_OUTPUT]    = CONF_PWM_OUT_MUX;
+	tcc_init(&tcc_instance, CONF_PWM_MODULE, &config_tcc);
+	tcc_enable(&tcc_instance);	  
+	// PWM end
+}
+
+void servo_left() {
+	// PWM  Stopped 
+	struct tcc_config config_tcc;
+	tcc_get_config_defaults(&config_tcc, CONF_PWM_MODULE);
+	config_tcc.counter.clock_prescaler = TCC_CLOCK_PRESCALER_DIV16;
+	config_tcc.counter.period = 0xFFFF;
+	config_tcc.compare.wave_generation = TCC_WAVE_GENERATION_SINGLE_SLOPE_PWM;
+	config_tcc.compare.match[CONF_PWM_CHANNEL] = (0xFFFF / 100 * 5);
+	config_tcc.pins.enable_wave_out_pin[CONF_PWM_OUTPUT] = true;
+	config_tcc.pins.wave_out_pin[CONF_PWM_OUTPUT]        = CONF_PWM_OUT_PIN;
+	config_tcc.pins.wave_out_pin_mux[CONF_PWM_OUTPUT]    = CONF_PWM_OUT_MUX;
+	tcc_init(&tcc_instance, CONF_PWM_MODULE, &config_tcc);
+	tcc_enable(&tcc_instance);	  
+	// PWM end
+}
+
+void servo_right() {
+	// PWM  Stopped 
+	struct tcc_config config_tcc;
+	tcc_get_config_defaults(&config_tcc, CONF_PWM_MODULE);
+	config_tcc.counter.clock_prescaler = TCC_CLOCK_PRESCALER_DIV16;
+	config_tcc.counter.period = 0xFFFF;
+	config_tcc.compare.wave_generation = TCC_WAVE_GENERATION_SINGLE_SLOPE_PWM;
+	config_tcc.compare.match[CONF_PWM_CHANNEL] = (0xFFFF / 100 * 9);
+	config_tcc.pins.enable_wave_out_pin[CONF_PWM_OUTPUT] = true;
+	config_tcc.pins.wave_out_pin[CONF_PWM_OUTPUT]        = CONF_PWM_OUT_PIN;
+	config_tcc.pins.wave_out_pin_mux[CONF_PWM_OUTPUT]    = CONF_PWM_OUT_MUX;
+	tcc_init(&tcc_instance, CONF_PWM_MODULE, &config_tcc);
+	tcc_enable(&tcc_instance);  
+	// PWM end
+}
+
+/*int read_ping(){
+	
+	// intitialzie timer
+	struct tcc_config config_tcc;
+	tcc_get_config_defaults(&config_tcc, CONF_PWM_MODULE);
+	config_tcc.counter.clock_prescaler = TCC_CLOCK_PRESCALER_DIV16;
+	config_tcc.counter.period = 0xFFFF;
+	tcc_init(&tcc_instance, CONF_PWM_MODULE, &config_tcc);
+	
+	
+	struct port_config pc;
+	//set output to output
+	port_get_config_defaults(&pc);
+	pc.direction = PORT_PIN_DIR_OUTPUT;
+	port_pin_set_config(PING_PIN, &pc);
+	
+	//set input to input
+	port_get_config_defaults(&pc);
+	pc.input_pull = PORT_PIN_PULL_DOWN;
+	port_pin_set_config(PING_IN_PIN, &pc);
+	
+	// trigger
+	port_pin_set_output_level(PING_PIN, true);
+	delay_cycles_us(5); // 5us pulse
+	port_pin_set_output_level(PING_PIN, false);
+	
+	// input length	
+	int x;
+	while(port_pin_get_input_level(PING_IN_PIN) == false); // wait for rising edge
+	//x = tcc_get_count_value(SysTick);
+	//printf("got rising edge");
+	
+	
+	while(port_pin_get_input_level(PING_IN_PIN) == true); // wait for falling edge
+	uint32_t val = tcc_get_count_value(&tcc_instance);
+	printf("got falling edge");
+	
+	port_get_config_defaults(&pc);
+	pc.direction = PORT_PIN_DIR_OUTPUT;
+	port_pin_set_config(PING_PIN, &pc);
+	port_pin_set_output_level(PING_PIN, false);
+	
+	printf("val: %d\n");
+	
+	delay_cycles_ms(50);
+	
+	return 0;
+	
+	
+}*/
+
+struct adc_config adc_instance;
+void configure_adc(void)
+  {
+	struct adc_config conf_adc;
+
+	adc_get_config_defaults(&conf_adc);
+
+	conf_adc.reference = ADC_REFCTRL_REFSEL_INT1V;
+	conf_adc.positive_input = ADC_POSITIVE_INPUT_PIN16;
+	conf_adc.negative_input = ADC_NEGATIVE_INPUT_GND;
+
+	int status = adc_init(&adc_instance, ADC, &conf_adc);
+	if (status != STATUS_OK) {
+		printf("NOT OKAY\n");
+	}
+
+	adc_enable(&adc_instance);
+}
+
+uint16_t read_photo(){
+	uint16_t result = 0;
+	adc_start_conversion(&adc_instance);
+	do {
+		/* Wait for conversion to be done and read out result */
+	} while (adc_read(&adc_instance, &result) == STATUS_BUSY);
+	return result;
+}
+
+volatile uint32_t g_ul_ms_ticks = 0;
+void SysTick_Handler(void)
+{
+	g_ul_ms_ticks++;
+}
+
 void run_app() {
   printf ("Running LOCAL application\r\n");
   struct port_config pc;
@@ -898,8 +1044,33 @@ void run_app() {
   pc.direction = PORT_PIN_DIR_OUTPUT;
   port_pin_set_config(LED_PIN, &pc);
   
+  configure_adc();
+  
   int8_t old_level;
+  int8_t old_bright = -1;
+  uint16_t bright_arr[5] = {0};
+  int8_t bright_idx = 0;
+  
+  SysTick_Config(SystemCoreClock/1000);      /* Configure SysTick to generate an interrupt every millisecond */
+  
+  // make sure door is closed at startup
+  servo_left();
+  delay_cycles_ms(1000);
+  servo_stop();
+  bool door_state = false; // 0 closed, 1 open
+  
+  uint32_t time = g_ul_ms_ticks;
+  delay_cycles_ms(5000);
+  // Loop
   while (1) {
+	  //send alive every 60s
+	  /*if (g_ul_ms_ticks - time > 30000){
+		  printf("alive\n");
+		  mqtt_publish(&mqtt_inst, MAIN_CHAT_TOPIC, "alive", sizeof("alive"), 1, 1);
+		  time = g_ul_ms_ticks;
+		  
+	  }*/
+	  read_photo();
 	  /* Handle pending events from network controller. */
 	  sint8 wifiStatus = m2m_wifi_handle_events(NULL);
 	  /* Try to read user input from USART. */
@@ -907,6 +1078,8 @@ void run_app() {
 	  /* Checks the timer timeout. */
 	  sw_timer_task(&swt_module_inst);
 	  int8_t level = port_pin_get_input_level(LEFT_BUTTON_PIN);
+
+	  
 	  if( level == true && old_level == false )
 	  {
 		  //int mqtt_publish(struct mqtt_module *const module, const char *topic, const char *msg, uint32_t msg_len, uint8_t qos, uint8_t retain);
@@ -918,11 +1091,48 @@ void run_app() {
 	  old_level = level;
 	  
 	  //set led to actuator value
-	  port_pin_set_output_level(LED_PIN, actuator_state);
-	  
+	  //port_pin_set_output_level(LED_PIN, actuator_state);
+	  if (actuator_state == true && door_state == false) {
+		  // open the door
+		  servo_right();
+		  delay_cycles_ms(1000);
+		  servo_stop();
+		  door_state = true;
+	  } else if (actuator_state == false && door_state == true) {
+		  //close door
+		  servo_left();
+		  delay_cycles_ms(1000);
+		  servo_stop();
+		  door_state = false;
+	  }
 	  
 	  /* Checks the USART buffer. */
 	  check_usart_buffer(MAIN_CHAT_TOPIC);
+	  
+	  uint16_t photo_val = read_photo();
+	  //printf("photo: %d\n", photo_val);
+	  bright_arr[bright_idx++ % 5] = photo_val;
+	  uint16_t photo_avg = 0;
+	  for (int i = 0; i < 5; i++) photo_avg += bright_arr[i];
+	  photo_avg /= 5;
+	  int8_t bright = 0;
+	  if (photo_avg > 1000) {
+		  // photo resistor is uncovered
+		  bright = 1;
+	  }
+	  if (!(bright == old_bright)) {
+		  if (bright == 1) {
+			  sprintf(pub_text, "%s", "on");
+		  } else {
+			  sprintf(pub_text, "%s", "off");
+		  }
+		  
+		  mqtt_publish(&mqtt_inst, SENSOR_TOPIC, pub_text, strlen(pub_text), 1, 1);  
+		  delay_ms(300);
+	  }
+	  //printf("Old: %d, New: %d\n", old_bright, bright);
+	  old_bright = bright;
+		  
   }
 
   // infinite loop
@@ -953,7 +1163,7 @@ int main (void)
 	//}
 
 	//usart_reset(&usart_instance);
-	//system_reset();
+	//system_reset(); 
 	// init state
 	init_state();
 	 // init storage
